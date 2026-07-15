@@ -1,53 +1,203 @@
-# FDA_510k Prediction Engine: Architectural Decision Records
+# DeviceGap: Architectural Decision Records
 
-Predicts FDA device submissions 3-5 years forward by analyzing patent filing trends as leading indicators.
-
----
-
-## Core Insight
-
-**Patent filings precede FDA submissions by 2-4 years.** Companies file patents to protect IP, then commercialize via FDA 510k submissions. By analyzing *where patents are clustering*, you can forecast *where device approvals will follow*.
-
-```
-2023-2024: Heavy patents in "cardiac monitoring + AI"
-   ↓
-2025-2026: Patent clusters stabilize, intensity plateaus
-   ↓
-2026-2027: Predict surge in cardiac monitoring 510k submissions
-   ↓
-2027+: Monitor actual FDA approvals, score prediction accuracy
-```
+Medical device gap analysis: joining predicate citations, embeddings, adverse events, patents, and reimbursement data to identify whitespace opportunities.
 
 ---
 
-## ADR-1: Leverage Patent Landscape Clustering (Upstream Signal)
+## ADR-1: Honest About Data Limitations (Not Hidden)
 
-**Decision**: Use HDBSCAN clusters from patent_review as the foundation for FDA predictions.
+**Decision**: Every report, viz, and score states its data caveats up-front. MAUDE denominator problem, predicate extraction confidence, survivorship bias—all in the product, not footnotes.
 
-**Why It Matters**: Patents are *early indicators* of R&D investment. FDA 510k submissions are the *outcome*.
+**Why It Matters**: This is a *credibility tool*, not a dashboarding tool. Wrong predictions in public are better than hidden limitations. The prediction ledger is only valuable if people trust it.
+
+**Example**:
+```
+This report identifies ≥1 persistent failure mode using MAUDE adverse events.
+Caveat: MAUDE counts have no exposure denominator (units sold unknown).
+Interpretation: Named failure clusters are signals for investigation, not statistical validation.
+```
+
+**Trade-off Accepted**: Honesty costs adoptability short-term. Builds moat long-term (competitors won't state limits; you will, and you'll be proven right).
+
+---
+
+## ADR-2: Predicate Extraction via Eval Set, Not Heuristics Alone
+
+**Decision**: Build a hand-checked eval set (~100 PDFs) to validate predicate extraction accuracy. Score every edge with a confidence metric.
+
+**Why It Matters**: Predicate citations are *the* linchpin. Wrong edges = wrong graph = wrong gap analysis.
+
+**The Risk**:
+- 510(k) summary PDFs have no standardized format
+- Predicate citations are parsed as K-numbers (`K\d{6}`) in context
+- Some summaries are "statements" with no technical content (no predicates)
+- Applicant names are unnormalized ("Foo Inc" vs "Foo Incorporated")
+
+**Mitigation**:
+- Hand-check ~100 PDFs, record extraction accuracy per type (e.g., "K-number in title: 98% accuracy", "K-number in body: 87%")
+- Every extracted edge carries a `confidence_score` (0–1)
+- Human review required before edges feed published claims
+- Report coverage % per product code (e.g., "83% of K-numbers have summaries with predicates")
+
+**Why This Matters for Architecture**: The system is only as good as its graph. Data quality is non-negotiable.
+
+---
+
+## ADR-3: Empirical Lag Distribution (Not Assumed Window)
+
+**Decision**: Instead of claiming "products take 18–36 months from patent to 510(k)," measure it from historical data.
+
+**Why It Matters**: "18–36 months" is widely quoted but unvalidated. The actual lag varies by product code.
+
+**Method**:
+```
+For each product code:
+  1. Extract all 510(k) clearances (applicant, decision date)
+  2. Match applicant to patent portfolio (USPTO, same applicant)
+  3. For clearances by new entrants, find prior patents by same assignee
+  4. Compute lag distribution: clearance_date - max(patent_filing_dates)
+  5. Report: median ± IQR per product code
+
+Example result:
+  Cardiac monitoring: median 24 months, IQR 12–36 months
+  Orthopedic implants: median 36 months, IQR 24–48 months
+```
+
+**Caveat (required)**:
+- Survivorship-conditioned: lags observed only for entrants who *actually arrived*
+- Doesn't capture abandoned filings
+- Doesn't account for defensive/licensing patents
+
+**Why This Choice**: Measured data beats priors. The IQR is the real deliverable (shows variation by code).
+
+---
+
+## ADR-4: Four Gap Types + Reimbursement Filter
+
+**Decision**: Not a flexible scoring matrix. Four discrete gap types + one severity modifier (reimbursement).
+
+**Why It Matters**: Clarity. "Here are the 3–5 gaps that matter, ranked by type" beats "here are 47 gaps with scores 0.73–0.91."
+
+**Gap Types**:
+
+| Type | Predicate-Graph Signal | Patent Signal | Interpretation |
+|------|------------------------|---------------|-----------------|
+| **Contested Whitespace** | Sparse devices | Accelerating filings | Entrants coming; window closing; urgency HIGH |
+| **Ignored Whitespace** | Sparse devices | Flat/zero patents | Possible demand desert; risk HIGH unless demand signal exists |
+| **Broken Incumbency** | Dense devices + persistent failures | Non-incumbent acceleration | Disruption opportunity; tech is stale; market ready for new entrant |
+
+**Reimbursement Filter** (applied to all):
+- No HCPCS code → "gap you can't bill for" → demote severity + explain
+
+**Why This Structure**: Three types map to distinct business strategies. Clear enough for investor conversation; precise enough for engineering.
+
+---
+
+## ADR-5: Persistent Failure Mode (Not Raw Event Counts)
+
+**Decision**: Rank failures by narrative persistence across predicate generations, not by raw MAUDE event count.
+
+**Why It Matters**: MAUDE has a huge denominator problem (no units sold). Ranking by count is misleading.
+
+**Method**:
+```
+1. Cluster MAUDE narratives (device family + semantic embeddings + HDBSCAN)
+2. For each cluster, track across predicate generations:
+   - Does cluster recur in next-generation devices?
+   - Do clusters share similar keywords (persistent theme)?
+3. If cluster persists + co-occurs with recalls, name it as a failure mode
+4. Report: name + narrative examples (paraphrased, anonymized) + generation span
+```
+
+**Example (Cardiac Devices)**:
+- Failure Mode: "Battery depletion before expected service life"
+- Observed: All predicate generations 2010–2024
+- MAUDE clusters: 4 distinct narrative clusters, consistent terminology
+- Associated recalls: 3 Class II recalls, 2016–2022
+- Interpretation: Persistent, known issue in lineage
+
+**Why This Choice**: Persistence is a signal. Raw counts are noise.
+
+---
+
+## ADR-6: Separate Semantic Indices for Device vs. MAUDE Narratives
+
+**Decision**: Embed device descriptions + MAUDE narratives in the *same* model space, but maintain separate indices.
+
+**Why It Matters**: Device descriptions optimize for class prediction; MAUDE narratives optimize for failure clustering. Same embedding space lets you measure proximity; separate indices keep queries fast.
 
 **Architecture**:
-
 ```
-Patent Data (USPTO HUPD)
+sentence-transformers model (BGE-large or GTE-large)
     ↓
-[Patent Embedding + Clustering] (from patent_review)
+[Device text index]  ← intended use + description
+    ↓ (same embedding space)
+    ← proximity = semantic similarity across classes
     ↓
-Cluster Features:
-├─ Domain (CPC category)
-├─ Cluster centroid (semantic position)
-├─ Cluster size (filing volume)
-├─ Growth rate (year-over-year delta)
-├─ Player concentration (top filers)
-└─ Filing velocity (accelerating or plateauing?)
+[MAUDE narrative index]  ← failure descriptions
     ↓
-[Time-Series Forecasting] ← NEW LAYER
-    ↓
-Predict 510k submissions (3-5 year horizon)
+Query: kNN search in device space finds nearby device regions
+       kNN search in MAUDE space finds similar failure narratives
+       Cross-index similarity reveals failure concentration near device clusters
 ```
 
-**Why This Choice**:
-- Patent_review already ingests + clusters USPTO data
+**Why Separate**:
+- MAUDE narratives are rare per device (most devices have 0 events)
+- Mixing with device text dilutes device-class signal
+- Independent indices mean independent scaling (device index may grow 100×; MAUDE stays bounded)
+
+---
+
+## ADR-7: DuckDB (Dev) + Postgres (Prod) Migration Path
+
+**Decision**: Start with DuckDB for speed. Schema designed so migration to Postgres is straightforward (Phase 4+).
+
+**Why It Matters**: Phase 1–3 are solo/research. Phase 4+ might need multi-tenant SaaS or custom reports at scale.
+
+**Trade-off**:
+- DuckDB: fast, local, single-process, perfect for Phase 1–4
+- Schema written to be Postgres-compatible (typed columns, FK constraints, no DuckDB-specific features)
+- When Postgres needed: schema mostly just works; indexes and conn pooling added
+
+**Why This Approach**: Don't over-engineer early. DuckDB is faster for Phase 1–4 work. Path to scaling is clear if/when revenue justifies it.
+
+---
+
+## ADR-8: Public Prediction Ledger (Append-Only)
+
+**Decision**: Every prediction published with date, claim, resolution criteria, and eventual outcome. Ledger is append-only; wrong predictions aren't deleted.
+
+**Why It Matters**: This is the moat. Public track record compounds credibility.
+
+**Format**:
+```jsonl
+{"date": "2026-07-15", "product_code": "ABC", "claim": "≥1 new competitor 510(k)", "window_months": 24, "resolution_date": "2028-07-15", "outcome": null}
+{"date": "2026-06-01", "product_code": "XYZ", "claim": "persistent failure mode in cardiac leads", "evidence": "narrative cluster across 3 generations", "outcome": "confirmed_by_recall_2026-09"}
+```
+
+**Why Public**:
+- Competitors hide track records
+- You don't; you're building credibility
+- Wrong predictions → methodology improvement → next prediction better
+
+---
+
+## Summary: Honesty as Architecture
+
+Every decision above is driven by one principle:
+
+**Trust through Transparency, Not Glossy Presentation**
+
+| Decision | Transparency Principle |
+|----------|------------------------|
+| Caveats in product | MAUDE denominator stated everywhere |
+| Eval set for extraction | Confidence scores on edges, coverage % reported |
+| Measured lag, not assumed | IQR with survivorship caveat |
+| Persistence over counts | Explicit: "not ranking by raw events" |
+| Separate indices | Tradeoff explained in reports |
+| Append-only predictions | Wrong predictions public, not hidden |
+
+This is unusual. Most analysis tools emphasize confidence. DeviceGap emphasizes honesty. Over years, honesty wins credibility.
 - Reusing embeddings + clusters avoids duplicate work
 - Timestamps are clean (filing date is deterministic)
 - CPC taxonomy maps naturally to FDA device categories
