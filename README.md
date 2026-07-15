@@ -121,9 +121,7 @@ Every quarter:
 - Retrain models
 - Compare new forecast to prior quarter's 2027 prediction
 - Publish tracking error
-
-**Why this matters**: Real data updates beliefs. If lag was 2.1yr and actual is 2.3yr, you detect it and adapt.
-
+  
 ---
 
 ## Tech Stack
@@ -152,45 +150,6 @@ See [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) for detailed ADRs cov
 - ADR-7: Multiple output formats (investor vs. regulatory)
 - ADR-8: Continuous recalibration (streaming 510k approvals)
 
----
-
-## For Technical Interviews
-
-**Key questions**:
-
-1. **"Why is patent filing a better signal than market research surveys?"**
-   - Patents are behavioral (companies invest). Surveys are opinion.
-
-2. **"You backtest on 2022-2025. How do you know your accuracy will hold in 2026?"**
-   - Quarterly recalibration + tracking error publication. Adapt if patterns shift.
-
-3. **"Lag is normally distributed. What if it's bimodal?"**
-   - Tests: Do you know your assumptions? Can you detect when they break?
-
-4. **"Your forecast is wrong. How do you debug time-series models?"**
-   - Tests: Do you understand model failure modes?
-
-5. **"Patent-to-FDA lag is 2.1 years. What invalidates this assumption?"**
-   - Acquired tech (no internal R&D), regulatory changes, market disruption.
-
----
-
-## Full Code
-
-**This repository contains architecture and design philosophy.** Full source code is private.
-
-For technical interviews, I can grant read-only access:
-- Complete Python lag-discovery pipeline
-- Time-series forecasting models (ARIMA, Prophet, LSTM)
-- Backtesting framework
-- Historical FDA data alignment
-- Quarterly recalibration scripts
-- Reporting templates (investor + regulatory)
-
-**Contact**: yow.stephend@gmail.com
-
----
-
 ## Development Approach
 
 
@@ -198,7 +157,7 @@ This demonstrates: building leading-indicator systems that connect upstream sign
 
 ---
 
-**Status**: In active development (quarterly forecasts published)  
+**Status**: In active development
 **Data**: 4.5M patents via patent_review + FDA 510k database (historical alignment)  
 **Forecast Horizon**: 3-5 years forward  
 **Update Cadence**: Quarterly (as new 510k submissions arrive)
