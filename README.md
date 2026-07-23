@@ -15,7 +15,7 @@ Companies file patents to protect IP, then commercialize via FDA 510k submission
 - **Category-specific** (cardiac monitoring: 2.1yr lag, diagnostics: 1.5yr lag)
 - **Quantified** (with uncertainty bands: ± std dev)
 
-By analyzing *where patents cluster now*, forecast *where device approvals will follow*.
+By analyzing *where patents cluster now*, the engine forecasts *where device approvals will follow*.
 
 ```
 2023-2024: Heavy patents in "AI-powered cardiac monitoring"
